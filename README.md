@@ -1,6 +1,6 @@
 # My Drive
 
-A personal, browser-encrypted file manager hosted by GitHub Pages. Built from the public [RepoDrive template](https://github.com/cheeseonamonkey/github-drive).
+A personal, browser-encrypted file manager hosted by GitHub Pages. Built from my public [RepoDrive template](https://github.com/cheeseonamonkey/github-drive). *(you can make one too!)*
 
 **The website and repository can be public. The vault's contents and filenames remain encrypted.** The only exception is the deliberately unencrypted **Public files** folder.
 
