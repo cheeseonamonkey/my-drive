@@ -10,6 +10,7 @@ export interface VaultHeader {
 const te = new TextEncoder();
 const td = new TextDecoder('utf-8', { fatal: true });
 const MANIFEST_AAD = te.encode('repodrive:manifest:v1');
+const TRANSFER_AAD = te.encode('repodrive:transfer:v1');
 const BLOCK_AAD_PREFIX = 'repodrive:block:v1:';
 export const BLOCK_BYTES = 1024 * 1024;
 
@@ -100,4 +101,13 @@ export async function unsealManifest<T>(key: CryptoKey, bytes: Uint8Array): Prom
 
 export function blockAAD(id: string): Uint8Array {
   return te.encode(BLOCK_AAD_PREFIX + id);
+}
+
+/** Encrypt upload checkpoints before saving them on the user's device. */
+export async function sealTransfer(key: CryptoKey, value: unknown): Promise<string> {
+  return toBase64(await seal(key, te.encode(JSON.stringify(value)), TRANSFER_AAD));
+}
+
+export async function unsealTransfer<T>(key: CryptoKey, value: string): Promise<T> {
+  return JSON.parse(td.decode(await unseal(key, fromBase64(value), TRANSFER_AAD))) as T;
 }

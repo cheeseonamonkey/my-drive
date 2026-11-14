@@ -6,3 +6,4 @@ dist/
 *.log
 auth-worker/wrangler.jsonc
 .wrangler/
+storage-worker/wrangler.jsonc

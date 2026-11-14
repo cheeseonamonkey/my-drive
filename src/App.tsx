@@ -6,7 +6,8 @@ import {
   Search, ShieldCheck, Trash2, Upload, X,
 } from 'lucide-react';
 import { encodePath, Entry, GitHubDrive, MAX_UPLOAD_BYTES, RepoDetails } from './github';
-import { PUBLIC_FOLDER, VaultDrive } from './vault';
+import { PUBLIC_FOLDER, VaultDrive, UploadProgress } from './vault';
+import { RemoteBlockStore } from './remote-blocks';
 import { offerToSaveVaultPassword } from './browser-password';
 import { beginGitHubLogin, completeGitHubLogin, oauthEnabled } from './auth';
 import {
@@ -15,7 +16,7 @@ import {
 } from './file';
 
 type Connection = { api: VaultDrive; repo: RepoDetails };
-type Pending = { github: GitHubDrive; repo: RepoDetails; exists: boolean };
+type Pending = { github: GitHubDrive; repo: RepoDetails; exists: boolean; remote?: RemoteBlockStore };
 type Preview = { kind: 'loading' | 'text' | 'image' | 'other' | 'error'; value?: string };
 type NameDialog = { type: 'folder' | 'rename'; item?: Entry };
 type View = 'list' | 'grid';
@@ -98,6 +99,9 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
+  const uploadController = useRef<AbortController | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<(UploadProgress & { name: string }) | null>(null);
+  const [resume, setResume] = useState<{ path: string; done: number; total: number } | null>(null);
 
   const shown = useMemo(() => entriesBy(items.filter((item) =>
     item.name.toLowerCase().includes(filter.trim().toLowerCase()) &&
@@ -110,6 +114,14 @@ export default function App() {
   const segments = path ? path.split('/') : [];
 
   function refresh() { setVersion((value) => value + 1); }
+
+  function refreshFromGitHub() {
+    if (!connection) return;
+    void perform('Refreshing…', async () => {
+      await connection.api.reload();
+      refresh();
+    });
+  }
 
   async function perform(label: string, job: () => Promise<void>) {
     if (busy) return;
@@ -187,7 +199,9 @@ export default function App() {
       const repo = await api.details();
       await api.list('', repo.default_branch);
       const exists = await VaultDrive.exists(api, repo.default_branch);
-      setPending({ github: api, repo, exists });
+      const endpoint = import.meta.env.VITE_BLOCK_WORKER_URL;
+      setPending({ github: api, repo, exists,
+        remote: endpoint ? new RemoteBlockStore(endpoint, secret.trim()) : undefined });
       setToken('');
       setPath('');
     });
@@ -223,14 +237,16 @@ export default function App() {
     }
     await perform(pending.exists ? 'Unlocking vault…' : 'Encrypting new vault…', async () => {
       const api = pending.exists
-        ? await VaultDrive.unlock(pending.github, pending.repo.default_branch, password)
-        : await VaultDrive.create(pending.github, pending.repo.default_branch, password);
+        ? await VaultDrive.unlock(pending.github, pending.repo.default_branch, password, pending.remote)
+        : await VaultDrive.create(pending.github, pending.repo.default_branch, password, pending.remote);
+      const interrupted = await api.pendingUpload();
+      setResume(interrupted);
       offerToSaveVaultPassword(pending.repo.full_name, password);
       setConnection({ api, repo: pending.repo });
       setPending(null);
       vaultForm.current?.reset();
       setAcknowledged(false);
-      setPath('');
+      setPath(interrupted ? interrupted.path.split('/').slice(0, -1).join('/') : '');
     });
   }
 
@@ -248,23 +264,42 @@ export default function App() {
   }
 
   function upload(files: File[]) {
-    if (!connection || files.length === 0) return;
+    if (!connection || files.length === 0 || busy) return;
     const publicUpload = path === PUBLIC_FOLDER || path.startsWith(PUBLIC_FOLDER + '/');
     if (publicUpload && !window.confirm(
-      'PUBLIC AND UNENCRYPTED: these files will be readable by anyone if the repository is public, and Git history may retain them forever. Continue?'
+      'PUBLIC AND UNENCRYPTED: uploaded files will be readable by anyone and Git history may retain them forever. Continue?'
     )) return;
+    const destination = path;
+    const controller = new AbortController();
+    uploadController.current = controller;
     void perform('Uploading…', async () => {
       try {
         for (const file of files) {
           if (!validName(file.name)) throw new Error('Invalid filename: ' + file.name);
-          if (file.size > MAX_UPLOAD_BYTES) throw new Error(file.name + ' exceeds the 10 MiB limit.');
+          const max = publicUpload ? MAX_UPLOAD_BYTES : connection.api.maxUploadBytes;
+          if (file.size > max) {
+            throw new Error(file.name + (publicUpload
+              ? ' is too large for public Git storage (10 MiB max).'
+              : ' exceeds the storage limit. Configure an R2 Worker for large uploads.'));
+          }
           const existing = items.find((item) => item.name === file.name);
           if (existing?.type === 'dir') throw new Error('A folder already uses the name ' + file.name);
           if (existing && !window.confirm('Replace ' + file.name + '?')) continue;
-          await connection.api.write([path, file.name].filter(Boolean).join('/'),
-            new Uint8Array(await file.arrayBuffer()), existing?.sha);
+          const nextPath = [destination, file.name].filter(Boolean).join('/');
+          setUploadProgress({ name: file.name, done: 0, total: file.size });
+          await connection.api.writeFile(nextPath, file, existing?.sha,
+            (progress) => setUploadProgress({ name: file.name, ...progress }), controller.signal);
+          setResume(await connection.api.pendingUpload());
+          refresh();
         }
-      } finally { refresh(); }
+      } catch (error) {
+        if ((error as DOMException).name !== 'AbortError') throw error;
+      } finally {
+        setResume(await connection.api.pendingUpload().catch(() => null));
+        setUploadProgress(null);
+        uploadController.current = null;
+        refresh();
+      }
     });
   }
 
@@ -305,18 +340,14 @@ export default function App() {
         refresh();
       });
     } else if (target) {
-      if (target.size > MAX_UPLOAD_BYTES) { setError('Files over 10 MiB cannot be renamed.'); return; }
+      if (target.path.startsWith(PUBLIC_FOLDER + '/') && target.size > MAX_UPLOAD_BYTES) {
+        setError('Public files over 10 MiB cannot be renamed.');
+        return;
+      }
       void perform('Renaming…', async () => {
-        const newPath = [path, name].filter(Boolean).join('/');
-        const blob = await connection.api.read(target.path, connection.repo.default_branch);
-        await connection.api.write(newPath, new Uint8Array(await blob.arrayBuffer()));
-        try { await connection.api.delete(target.path, target.sha); }
-        catch (reason) {
-          refresh();
-          throw new Error('New file created, but the original could not be deleted. Both may exist. ' + formatError(reason));
-        }
-        setSelected(null);
-        refresh();
+        const nextPath = [path, name].filter(Boolean).join('/');
+        try { await connection.api.rename(target.path, nextPath, target.sha); }
+        finally { setSelected(null); refresh(); }
       });
     }
   }
@@ -341,8 +372,42 @@ export default function App() {
 
   function download(item: Entry) {
     if (!connection) return;
+    type SaveHandle = { createWritable(): Promise<{
+      write(data: Uint8Array): Promise<void>;
+      close(): Promise<void>;
+      abort(): Promise<void>;
+    }> };
+    const picker = (window as Window & {
+      showSaveFilePicker?: (options: { suggestedName: string }) => Promise<SaveHandle>;
+    }).showSaveFilePicker;
+
+    // The picker is invoked directly from the click to preserve user activation.
     void perform('Downloading…', async () => {
-      const blob = await connection.api.read(item.path, connection.repo.default_branch);
+      if (picker && !item.path.startsWith(PUBLIC_FOLDER + '/')) {
+        let handle: SaveHandle;
+        try { handle = await picker({ suggestedName: item.name }); }
+        catch (error) {
+          if ((error as DOMException).name === 'AbortError') return;
+          throw error;
+        }
+        const writable = await handle.createWritable();
+        try {
+          await connection.api.downloadTo(item.path, (chunk) => writable.write(chunk));
+          await writable.close();
+        } catch (error) { await writable.abort().catch(() => {}); throw error; }
+        return;
+      }
+      if (item.size > 64 * 1024 * 1024) {
+        throw new Error('Downloads over 64 MiB require streaming Save As support (Chromium desktop).');
+      }
+      let blob: Blob;
+      if (item.size > MAX_UPLOAD_BYTES && !item.path.startsWith(PUBLIC_FOLDER + '/')) {
+        const chunks: Uint8Array[] = [];
+        await connection.api.downloadTo(item.path, async (chunk) => { chunks.push(new Uint8Array(chunk)); });
+        blob = new Blob(chunks.map((part) => new Uint8Array(part)));
+      } else {
+        blob = await connection.api.read(item.path, connection.repo.default_branch);
+      }
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -362,6 +427,9 @@ export default function App() {
   }
 
   function disconnect() {
+    uploadController.current?.abort();
+    setUploadProgress(null);
+    setResume(null);
     setPending(null);
     setAcknowledged(false);
     setOauthToken('');
@@ -451,7 +519,7 @@ export default function App() {
           <section className="mx-auto max-w-[440px] pt-3 sm:pt-7">
             <h1 className="text-[23px] font-medium tracking-tight">Connect to GitHub</h1>
             <p className="mt-2 text-[13px] leading-6 text-muted">
-              Connect to the storage repository. If no vault exists, setup starts automatically.
+              Connect to the storage repository. New vaults have guided setup.
             </p>
             <form className="mt-6 space-y-4" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
               <label className="block">
@@ -548,7 +616,35 @@ export default function App() {
               </div>
             </div>
 
-            {busy && <p role="status" aria-live="polite" className="mb-3 text-xs text-accent">{busy}</p>}
+            {resume && !busy && (
+              <div className="mb-3 flex items-start justify-between gap-3 border border-line bg-white px-3 py-2.5 text-xs">
+                <span className="min-w-0 break-words">
+                  Interrupted upload: <strong>{resume.path}</strong> ({Math.round(100 * resume.done / Math.max(resume.total, 1))}%).
+                  Re-select the same file to resume.
+                </span>
+                <div className="flex shrink-0 gap-3">
+                  <button className="underline" onClick={() =>
+                    navigate(resume.path.split('/').slice(0, -1).join('/'))}>Open folder</button>
+                  <button className="underline" onClick={() => {
+                    connection.api.discardPendingUpload(); setResume(null);
+                  }}>Discard</button>
+                </div>
+              </div>
+            )}
+            {uploadProgress && (
+              <div className="mb-3 border border-line bg-white px-3 py-2.5 text-xs" role="status" aria-live="polite">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate">{uploadProgress.name}</span>
+                  <span className="shrink-0 tabular-nums">
+                    {readableSize(uploadProgress.done)} / {readableSize(uploadProgress.total)}
+                  </span>
+                  <button className="shrink-0 underline" onClick={() => uploadController.current?.abort()}>Cancel</button>
+                </div>
+                <progress className="mt-2 h-1.5 w-full accent-accent" max={Math.max(1, uploadProgress.total)}
+                  value={uploadProgress.done} aria-label="Upload progress" />
+              </div>
+            )}
+            {busy && !uploadProgress && <p role="status" className="mb-3 text-xs text-muted">{busy}</p>}
 
             <div className="surface overflow-hidden">
               <div className="flex min-h-13 flex-wrap items-center gap-1 border-b border-line px-3 py-2 sm:px-4">
@@ -575,7 +671,7 @@ export default function App() {
                     {filter && <button aria-label="Clear search" onClick={() => setFilter('')}><X size={15} className="text-muted" /></button>}
                   </label>
                   <button className="flex size-10 shrink-0 items-center justify-center border border-line hover:bg-paper"
-                    title="Refresh" aria-label="Refresh folder" disabled={!!busy} onClick={refresh}><RefreshCw size={16} /></button>
+                    title="Refresh" aria-label="Refresh folder" disabled={!!busy} onClick={refreshFromGitHub}><RefreshCw size={16} /></button>
                 </div>
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
                   <div className="flex min-w-0 max-w-full items-center gap-0.5 overflow-x-auto">
@@ -666,7 +762,9 @@ export default function App() {
               {path ? <button className="flex min-h-10 items-center gap-1.5 hover:text-ink"
                 onClick={() => navigate(segments.slice(0, -1).join('/'))}><ArrowLeft size={14} /> Parent folder</button> :
                 <span>{shown.length} items shown</span>}
-              <span>Max upload 10 MiB · Git history persists</span>
+              <span>{connection.api.maxUploadBytes > MAX_UPLOAD_BYTES
+                ? 'R2 large-file storage · Encrypted'
+                : '10 MiB limit · Configure R2 for larger files'}</span>
             </div>
           </section>
         )}

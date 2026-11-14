@@ -34,6 +34,7 @@ jobs:
         env:
           GITHUB_PAGES: 'true'
           VITE_DEFAULT_STORAGE_REPO: ${{ github.repository }}
+          VITE_BLOCK_WORKER_URL: ${{ vars.VITE_BLOCK_WORKER_URL }}
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
           VITE_GITHUB_OAUTH_EXCHANGE_URL: ${{ vars.VITE_GITHUB_OAUTH_EXCHANGE_URL }}
       - uses: actions/configure-pages@v5

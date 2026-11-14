@@ -10,6 +10,7 @@ vi.mock('./vault', () => {
   class FakeVaultDrive {
     static async exists() { return false; }
     static async create() { return new FakeVaultDrive(); }
+    async pendingUpload() { return null; }
     async list() {
       return [
         { name: 'Public files', path: 'Public files', type: 'dir', sha: 'public', size: 0 },

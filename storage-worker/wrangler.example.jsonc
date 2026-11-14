@@ -1,0 +1,13 @@
+{
+  "name": "my-drive-storage",
+  "main": "index.ts",
+  "compatibility_date": "2026-11-01",
+  "vars": {
+    "SITE_URL": "https://cheeseonamonkey.github.io/my-drive/",
+    "GITHUB_OWNER": "cheeseonamonkey",
+    "GITHUB_REPO": "my-drive"
+  },
+  "r2_buckets": [
+    { "binding": "BLOCKS", "bucket_name": "my-drive-blocks" }
+  ]
+}

@@ -3,10 +3,25 @@ import { webcrypto } from 'node:crypto';
 import { GitHubDrive, MAX_UPLOAD_BYTES, Entry } from './github';
 import { PUBLIC_FOLDER, VaultDrive, VAULT_FILE } from './vault';
 import { BLOCK_BYTES } from './vault-crypto';
+import { RemoteBlockStore, REMOTE_BLOCK_BYTES } from './remote-blocks';
 
 const oldCrypto = globalThis.crypto;
+const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const pending = new Map<string, string>();
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: {
+    getItem: (key: string) => pending.get(key) || null,
+    setItem: (key: string, value: string) => { pending.set(key, value); },
+    removeItem: (key: string) => { pending.delete(key); },
+  },
+});
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
-afterAll(() => Object.defineProperty(globalThis, 'crypto', { value: oldCrypto, configurable: true }));
+afterAll(() => {
+  Object.defineProperty(globalThis, 'crypto', { value: oldCrypto, configurable: true });
+  if (oldStorage) Object.defineProperty(globalThis, 'localStorage', oldStorage);
+  else Reflect.deleteProperty(globalThis, 'localStorage');
+});
 
 class MemoryGithub {
   files = new Map<string, { bytes: Uint8Array; sha: string }>();
@@ -110,5 +125,87 @@ describe('encrypted filesystem (integration)', () => {
     const memory = new MemoryGithub();
     const drive = await VaultDrive.create(asApi(memory), 'main', 'yet another unique secure password');
     await expect(drive.write('too-big.bin', new Uint8Array(MAX_UPLOAD_BYTES + 1))).rejects.toThrow('10 MiB');
+  });
+});
+
+class MemoryRemote {
+  blobs = new Map<string, Uint8Array>();
+  calls = 0;
+  failCall = 0;
+  async exists(id: string) { return this.blobs.has(id); }
+  async upload(id: string, encrypted: Uint8Array) {
+    if (++this.calls === this.failCall) throw new Error('Network disconnected.');
+    this.blobs.set(id, new Uint8Array(encrypted));
+  }
+  async download(id: string) {
+    const block = this.blobs.get(id);
+    if (!block) throw new Error('Missing encrypted R2 block.');
+    return new Uint8Array(block);
+  }
+}
+
+describe('large uploads and recovery', () => {
+  it('encrypts checkpoints, resumes after failure, streams downloads and renames with no data transfer', async () => {
+    pending.clear();
+    const github = new MemoryGithub();
+    const remote = new MemoryRemote();
+    const adapter = remote as unknown as RemoteBlockStore;
+    const password = 'strong test password for a large vault';
+    const vault = await VaultDrive.create(asApi(github), 'main', password, adapter);
+    const bytes = new Uint8Array(10 * 1024 * 1024 + 3);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i % 223;
+    const input = new File([bytes], 'private-data.bin', { lastModified: 12345 });
+
+    remote.failCall = 2;
+    await expect(vault.writeFile('private-data.bin', input)).rejects.toThrow('Network disconnected.');
+    expect((await vault.list('', 'main')).map((item) => item.name)).toEqual([PUBLIC_FOLDER]);
+    const checkpoint = await vault.pendingUpload();
+    expect(checkpoint).toEqual({ path: 'private-data.bin', done: REMOTE_BLOCK_BYTES, total: input.size });
+    expect([...pending.values()].join('')).not.toContain('private-data.bin');
+    expect([...pending.values()].join('')).not.toContain(password);
+    expect([...github.files.keys()].filter((key) => key.startsWith('.vault/blocks/'))).toHaveLength(0);
+
+    const reopened = await VaultDrive.unlock(asApi(github), 'main', password, adapter);
+    remote.failCall = 0;
+    const resumed = new File([bytes], 'private-data.bin', { lastModified: 55555 });
+    const progress: number[] = [];
+    await reopened.writeFile('private-data.bin', resumed, undefined, ({ done }) => progress.push(done));
+    expect(progress).toEqual([REMOTE_BLOCK_BYTES, resumed.size]);
+    expect(remote.calls).toBe(3); // successful first part was not reuploaded
+    expect(remote.blobs.size).toBe(2);
+    expect(await reopened.pendingUpload()).toBeNull();
+    expect(await reopened.list('', 'main')).toHaveLength(2);
+    await expect(reopened.read('private-data.bin', 'main')).rejects.toThrow('streamed download');
+
+    const downloaded: Uint8Array[] = [];
+    await reopened.downloadTo('private-data.bin', async (chunk) => { downloaded.push(new Uint8Array(chunk)); });
+    expect(downloaded.map((part) => part.length)).toEqual([REMOTE_BLOCK_BYTES, bytes.length - REMOTE_BLOCK_BYTES]);
+    const combined = new Uint8Array(bytes.length);
+    let offset = 0;
+    for (const part of downloaded) { combined.set(part, offset); offset += part.length; }
+    const hash = (data: Uint8Array) =>
+      webcrypto.subtle.digest('SHA-256', new Uint8Array(data)).then((sum) => Buffer.from(sum).toString('hex'));
+    expect(await hash(combined)).toBe(await hash(bytes));
+
+    const record = (await reopened.list('', 'main')).find((item) => item.name === 'private-data.bin')!;
+    await reopened.rename(record.path, 'renamed.bin', record.sha);
+    expect(remote.blobs.size).toBe(2);
+    expect((await reopened.list('', 'main')).some((item) => item.name === 'renamed.bin')).toBe(true);
+
+    const renamed = (await reopened.list('', 'main')).find((item) => item.name === 'renamed.bin')!;
+    await reopened.delete(renamed.path, renamed.sha);
+    expect(remote.blobs.size).toBe(2); // History may still reference those blocks.
+  }, 20_000);
+
+  it('reloads concurrent encrypted manifest changes without replacing them', async () => {
+    pending.clear();
+    const github = new MemoryGithub();
+    const password = 'another test password for reloading';
+    const first = await VaultDrive.create(asApi(github), 'main', password);
+    const other = await VaultDrive.unlock(asApi(github), 'main', password);
+    await first.write('new.txt', new TextEncoder().encode('new'));
+    expect((await other.list('', 'main')).some((file) => file.name === 'new.txt')).toBe(false);
+    await other.reload();
+    expect((await other.list('', 'main')).some((file) => file.name === 'new.txt')).toBe(true);
   });
 });

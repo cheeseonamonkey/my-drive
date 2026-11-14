@@ -33,7 +33,7 @@ export class GitHubError extends Error {
 export class GitHubDrive {
   private readonly base: string;
 
-  constructor(private readonly token: string, repository: string) {
+  constructor(private readonly token: string, readonly repository: string) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) {
       throw new Error('Enter a repository as owner/name.');
     }
