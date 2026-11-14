@@ -3,57 +3,98 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
 import App from './App';
 
+vi.mock('./vault', () => {
+  class FakeVaultDrive {
+    static async exists() { return false; }
+    static async create() { return new FakeVaultDrive(); }
+    async list() {
+      return [
+        { name: 'Public files', path: 'Public files', type: 'dir', sha: 'public', size: 0 },
+        { name: 'notes.md', path: 'notes.md', type: 'file', sha: 'abcde12345', size: 12 },
+      ];
+    }
+    async read() { return new Blob(['hello']); }
+  }
+  return { VaultDrive: FakeVaultDrive, PUBLIC_FOLDER: 'Public files' };
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-describe('file manager', () => {
-  it('connects, lists files, and exposes file details', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith('/repos/test/files')) {
-        return Response.json({ full_name: 'test/files', private: true, default_branch: 'main' });
-      }
-      if (url.includes('/contents?ref=main')) {
-        return Response.json([
-          { name: 'docs', path: 'docs', type: 'dir', sha: 'folder-sha', size: 0 },
-          { name: 'notes.md', path: 'notes.md', type: 'file', sha: 'abcde12345', size: 12 },
-        ]);
-      }
-      if (url.includes('/contents/notes.md?ref=main')) return new Response('hello');
-      throw new Error('Unexpected request: ' + url);
-    });
-    vi.stubGlobal('fetch', fetchMock);
+function stubGithub() {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/repos/test/files')) {
+      return Response.json({ full_name: 'test/files', private: true, default_branch: 'main' });
+    }
+    if (url.includes('/contents?ref=main')) return Response.json([]);
+    throw new Error('Unexpected request: ' + url);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
 
+async function connectToSetup() {
+  fireEvent.change(screen.getByPlaceholderText('yourname/private-files'), { target: { value: 'test/files' } });
+  fireEvent.change(screen.getByPlaceholderText('github_pat_…'), { target: { value: 'test-token' } });
+  fireEvent.click(screen.getByRole('button', { name: /Open drive/i }));
+  await screen.findByText('Create your encrypted vault.');
+}
+
+async function initializeVault() {
+  fireEvent.change(screen.getByPlaceholderText('Enter a strong passphrase'), {
+    target: { value: 'a secure example password' },
+  });
+  fireEvent.change(screen.getByPlaceholderText('Enter the same passphrase again'), {
+    target: { value: 'a secure example password' },
+  });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: /Create encrypted drive/i }));
+  await screen.findByText('notes.md');
+}
+
+describe('first-run encrypted file manager', () => {
+  it('provides setup instructions and only reveals files after vault creation', async () => {
+    const fetchMock = stubGithub();
     render(<App />);
-    fireEvent.change(screen.getByPlaceholderText('yourname/private-files'), { target: { value: 'test/files' } });
-    fireEvent.change(screen.getByPlaceholderText('github_pat_…'), { target: { value: 'test-token' } });
-    fireEvent.click(screen.getByRole('button', { name: /Open drive/i }));
-    await screen.findByText('notes.md');
+    await connectToSetup();
+    expect(screen.getByText(/Git is forever-ish/)).toBeTruthy();
+    expect(screen.queryByText('notes.md')).toBeNull();
+    await initializeVault();
     expect(screen.getByText('1 files · 1 folders · 12 B in this folder')).toBeTruthy();
     fireEvent.click(screen.getByText('notes.md'));
     await screen.findByText('Location');
     expect(screen.getByText('abcde12345')).toBeTruthy();
-    expect(screen.getByRole('link', { name: /File history/i }).getAttribute('href')).toContain('/commits/main/notes.md');
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    const history = screen.getByRole('link', { name: /Encrypted vault history/i }).getAttribute('href')!;
+    expect(history).toContain('/commits/main/.vault/state.json');
+    expect(history).not.toContain('notes.md');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('disconnects without retaining a manual token', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith('/repos/test/files')) {
-        return Response.json({ full_name: 'test/files', private: true, default_branch: 'main' });
-      }
-      return Response.json([]);
-    });
-    vi.stubGlobal('fetch', fetchMock);
+  it('disconnects without retaining credentials', async () => {
+    stubGithub();
     render(<App />);
-    fireEvent.change(screen.getByPlaceholderText('yourname/private-files'), { target: { value: 'test/files' } });
-    fireEvent.change(screen.getByPlaceholderText('github_pat_…'), { target: { value: 'test-token' } });
-    fireEvent.click(screen.getByRole('button', { name: /Open drive/i }));
-    await screen.findByText(/test\/files/);
+    await connectToSetup();
+    await initializeVault();
     fireEvent.click(screen.getByRole('button', { name: /Disconnect/i }));
+    await waitFor(() => expect(screen.getByPlaceholderText('github_pat_…')).toBeTruthy());
     expect((screen.getByPlaceholderText('github_pat_…') as HTMLInputElement).value).toBe('');
+  });
+
+  it('requires acknowledgement of permanent git history and password recovery risk', async () => {
+    stubGithub();
+    render(<App />);
+    await connectToSetup();
+    fireEvent.change(screen.getByPlaceholderText('Enter a strong passphrase'), {
+      target: { value: 'a secure example password' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Enter the same passphrase again'), {
+      target: { value: 'a secure example password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Create encrypted drive/i }));
+    await screen.findByText('Please acknowledge the recovery and Git history warnings.');
+    expect(screen.queryByText('notes.md')).toBeNull();
   });
 });

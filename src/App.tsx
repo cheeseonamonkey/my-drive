@@ -6,13 +6,15 @@ import {
   Search, ShieldCheck, Trash2, Upload, X,
 } from 'lucide-react';
 import { encodePath, Entry, GitHubDrive, MAX_UPLOAD_BYTES, RepoDetails } from './github';
+import { PUBLIC_FOLDER, VaultDrive } from './vault';
 import { beginGitHubLogin, completeGitHubLogin, oauthEnabled } from './auth';
 import {
   category, entriesBy, extension, FileCategory, FileSort, PREVIEW_IMAGES, PREVIEW_TEXT,
   readableSize, typeLabel, validName,
 } from './file';
 
-type Connection = { api: GitHubDrive; repo: RepoDetails };
+type Connection = { api: VaultDrive; repo: RepoDetails };
+type Pending = { github: GitHubDrive; repo: RepoDetails; exists: boolean };
 type Preview = { kind: 'loading' | 'text' | 'image' | 'other' | 'error'; value?: string };
 type NameDialog = { type: 'folder' | 'rename'; item?: Entry };
 type View = 'list' | 'grid';
@@ -71,10 +73,14 @@ function NameEditor({ title, value, onCancel, onSave }: {
 }
 
 export default function App() {
-  const [repository, setRepository] = useState('');
+  const [repository, setRepository] = useState(import.meta.env.VITE_DEFAULT_STORAGE_REPO || '');
   const [token, setToken] = useState('');
   const [oauthToken, setOauthToken] = useState('');
   const [connection, setConnection] = useState<Connection | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [vaultPassword, setVaultPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
   const [path, setPath] = useState('');
   const [items, setItems] = useState<Entry[]>([]);
   const [filter, setFilter] = useState('');
@@ -180,7 +186,8 @@ export default function App() {
       const api = new GitHubDrive(secret.trim(), target.trim());
       const repo = await api.details();
       await api.list('', repo.default_branch);
-      setConnection({ api, repo });
+      const exists = await VaultDrive.exists(api, repo.default_branch);
+      setPending({ github: api, repo, exists });
       setToken('');
       setPath('');
     });
@@ -203,6 +210,26 @@ export default function App() {
     return () => { active = false; };
   }, []);
 
+  async function unlockVault() {
+    if (!pending) return;
+    if (!pending.exists) {
+      if (vaultPassword.length < 14) { setError('Use a password or passphrase of at least 14 characters.'); return; }
+      if (vaultPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
+      if (!acknowledged) { setError('Please acknowledge the recovery and Git history warnings.'); return; }
+    }
+    await perform(pending.exists ? 'Unlocking vault…' : 'Encrypting new vault…', async () => {
+      const api = pending.exists
+        ? await VaultDrive.unlock(pending.github, pending.repo.default_branch, vaultPassword)
+        : await VaultDrive.create(pending.github, pending.repo.default_branch, vaultPassword);
+      setConnection({ api, repo: pending.repo });
+      setPending(null);
+      setVaultPassword('');
+      setConfirmPassword('');
+      setAcknowledged(false);
+      setPath('');
+    });
+  }
+
   function navigate(next: string) {
     setFilter('');
     setTypeFilter('all');
@@ -218,6 +245,10 @@ export default function App() {
 
   function upload(files: File[]) {
     if (!connection || files.length === 0) return;
+    const publicUpload = path === PUBLIC_FOLDER || path.startsWith(PUBLIC_FOLDER + '/');
+    if (publicUpload && !window.confirm(
+      'PUBLIC AND UNENCRYPTED: these files will be readable by anyone if the repository is public, and Git history may retain them forever. Continue?'
+    )) return;
     void perform('Uploading…', async () => {
       try {
         for (const file of files) {
@@ -289,18 +320,18 @@ export default function App() {
   function remove(item: Entry) {
     if (!connection || !window.confirm('Delete ' + item.name + '? Git history will retain earlier versions.')) return;
     void perform('Deleting…', async () => {
-      await connection.api.delete(item.path, item.sha);
-      setSelected(null);
-      refresh();
+      try { await connection.api.delete(item.path, item.sha); }
+      finally { setSelected(null); refresh(); }
     });
   }
 
   function removeEmptyFolder() {
     if (!connection || !path || !window.confirm('Remove this empty folder?')) return;
     void perform('Deleting folder…', async () => {
-      await connection.api.deleteEmptyFolder(path, connection.repo.default_branch);
-      navigate(segments.slice(0, -1).join('/'));
-      refresh();
+      try {
+        await connection.api.deleteEmptyFolder(path, connection.repo.default_branch);
+        navigate(segments.slice(0, -1).join('/'));
+      } finally { refresh(); }
     });
   }
 
@@ -327,6 +358,10 @@ export default function App() {
   }
 
   function disconnect() {
+    setPending(null);
+    setVaultPassword('');
+    setConfirmPassword('');
+    setAcknowledged(false);
     setOauthToken('');
     setToken('');
     setConnection(null);
@@ -353,21 +388,84 @@ export default function App() {
               <button className="action action-outline !min-h-9 !px-3" onClick={disconnect}><LogOut size={15} /> Disconnect</button>
             </div>
           ) : (
-            <span className="flex items-center gap-1.5 text-xs text-muted"><LockKeyhole size={14} /> Private by default</span>
+            <span className="flex items-center gap-1.5 text-xs text-muted"><LockKeyhole size={14} /> Encrypted by default</span>
           )}
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-20 pt-8 sm:px-7 sm:pt-11">
-        {!connection ? (
+        {!connection && pending ? (
+          <section className="mx-auto max-w-[460px] pt-2 sm:pt-7">
+            <div className="mb-5 flex size-12 items-center justify-center rounded-2xl bg-[#ece6f7] text-accent">
+              <LockKeyhole size={24} strokeWidth={1.7} />
+            </div>
+            <p className="mb-2 text-xs font-medium text-accent">{pending.exists ? 'Welcome back' : 'First-time setup'}</p>
+            <h1 className="text-[27px] font-semibold tracking-tight">
+              {pending.exists ? 'Unlock your encrypted drive.' : 'Create your encrypted vault.'}
+            </h1>
+            <p className="mt-2 text-[13px] leading-6 text-muted">
+              {pending.exists
+                ? 'Enter the vault password you created. Nothing is decrypted on GitHub.'
+                : 'Your files and folder names will be encrypted locally before reaching GitHub.'}
+            </p>
+            {!pending.exists && (
+              <div className="surface mt-6 p-5">
+                <h2 className="mb-3 text-sm font-medium">How it works</h2>
+                <ol className="space-y-3 text-xs leading-5 text-muted">
+                  <li><strong className="mr-2 text-ink">1.</strong> Choose a long, unique password or passphrase.</li>
+                  <li><strong className="mr-2 text-ink">2.</strong> The browser generates a random salt and derives an encryption key with Argon2id.</li>
+                  <li><strong className="mr-2 text-ink">3.</strong> Upload into the encrypted drive. Only the separate <strong>Public files</strong> folder stays unencrypted.</li>
+                </ol>
+              </div>
+            )}
+            <form className="surface mt-4 space-y-4 p-5 sm:p-6" onSubmit={(event) => { event.preventDefault(); void unlockVault(); }}>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium">{pending.exists ? 'Vault password' : 'New vault password'}</span>
+                <input type="password" className="field" required autoComplete={pending.exists ? 'current-password' : 'new-password'}
+                  value={vaultPassword} onChange={(event) => setVaultPassword(event.target.value)} placeholder="Enter a strong passphrase" />
+              </label>
+              {!pending.exists && (
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium">Confirm password</span>
+                  <input type="password" className="field" required autoComplete="new-password"
+                    value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Enter the same passphrase again" />
+                </label>
+              )}
+              {!pending.exists && (
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[#e7d8bb] bg-[#fffcf6] p-3.5">
+                  <input type="checkbox" className="mt-1 accent-[#6b48b2]" checked={acknowledged}
+                    onChange={(event) => setAcknowledged(event.target.checked)} />
+                  <span className="text-[11px] leading-5 text-[#78634a]">
+                    <strong>Git is forever-ish.</strong> Deleted files may persist in Git history.
+                    I understand that public uploads are never encrypted, and losing my password
+                    permanently loses access to encrypted files. There is no password reset.
+                  </span>
+                </label>
+              )}
+              <button type="submit" className="action action-primary !min-h-11 w-full" disabled={!!busy}>
+                <LockKeyhole size={16} /> {busy || (pending.exists ? 'Unlock drive' : 'Create encrypted drive')}
+              </button>
+            </form>
+            <p className="mt-4 text-center text-[11px] leading-5 text-muted">
+              Passwords and encryption keys stay in the browser, never in GitHub secrets.
+            </p>
+            <button className="mx-auto mt-3 flex min-h-10 items-center gap-2 text-xs text-muted hover:text-ink"
+              onClick={disconnect}><ArrowLeft size={14} /> Back to repository login</button>
+          </section>
+        ) : !connection ? (
           <section className="mx-auto max-w-[440px] pt-3 sm:pt-9">
             <span className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-[#ece6f7] text-accent">
               <Folder size={24} strokeWidth={1.7} />
             </span>
             <h1 className="text-[27px] font-semibold tracking-tight sm:text-[34px]">Your files, minus the fuss.</h1>
             <p className="mt-2.5 text-[13px] leading-6 text-muted">
-              A small file manager for a GitHub repository. Browse, organize, and keep every version.
+              A small encrypted file manager backed by GitHub. Connect to a repository, then create or unlock your vault.
             </p>
+            <div className="mt-5 rounded-xl border border-line bg-white px-4 py-3 text-xs leading-5 text-muted">
+              <strong className="text-ink">First time?</strong> Connect to the repository hosting your personal drive.
+              After GitHub login, you'll get step-by-step vault setup. No password needs to be sent to GitHub.
+            </div>
             <form className="surface mt-7 space-y-4 p-5 sm:p-6" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
               <label className="block">
                 <span className="mb-1.5 block text-xs font-medium">Storage repository</span>
@@ -424,6 +522,16 @@ export default function App() {
             {dragging && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[#f6f1ff]/95">
               <div className="flex flex-col items-center gap-2 text-accent"><Upload size={30} /><span className="text-sm font-medium">Drop to upload here</span></div>
             </div>}
+            {path === PUBLIC_FOLDER || path.startsWith(PUBLIC_FOLDER + '/') ? (
+              <div className="mb-4 rounded-xl border border-[#e7d8bb] bg-[#fffcf6] px-4 py-3 text-xs leading-5 text-[#78634a]">
+                <strong>Public and unencrypted.</strong> Everything uploaded here is readable if this repository is public,
+                and deletion does not erase its Git history.
+              </div>
+            ) : (
+              <div className="mb-4 flex items-center gap-1.5 text-[11px] text-[#4b7351]">
+                <LockKeyhole size={13} /> Encrypted locally · Argon2id + AES-256-GCM
+              </div>
+            )}
             <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
                 <a href={'https://github.com/' + connection.repo.full_name} target="_blank" rel="noopener noreferrer"
@@ -520,7 +628,7 @@ export default function App() {
                   <Folder size={30} strokeWidth={1.5} className="mx-auto mb-3 text-[#ad9bcf]" />
                   <p className="text-sm font-medium">{items.length ? 'Nothing matches' : 'Nothing here yet'}</p>
                   <p className="mt-1.5 text-xs text-muted">{items.length ? 'Try a different filter.' : 'Upload something or create a folder.'}</p>
-                  {!items.length && path && <button className="action action-outline mt-5" onClick={removeEmptyFolder} disabled={!!busy}>Remove empty folder</button>}
+                  {!items.length && path && path !== PUBLIC_FOLDER && <button className="action action-outline mt-5" onClick={removeEmptyFolder} disabled={!!busy}>Remove empty folder</button>}
                 </div>
               ) : view === 'list' ? (
                 <div>
@@ -572,7 +680,7 @@ export default function App() {
               {path ? <button className="flex min-h-10 items-center gap-1.5 hover:text-ink"
                 onClick={() => navigate(segments.slice(0, -1).join('/'))}><ArrowLeft size={14} /> Parent folder</button> :
                 <span>{shown.length} items shown</span>}
-              <span>Max upload 10 MiB · Git-backed storage</span>
+              <span>Max upload 10 MiB · Git history persists</span>
             </div>
           </section>
         )}
@@ -632,9 +740,12 @@ export default function App() {
                 </div>
               </dl>
               <a href={'https://github.com/' + connection.repo.full_name + '/commits/' +
-                encodeURIComponent(connection.repo.default_branch) + '/' + encodePath(selected.path)}
+                encodeURIComponent(connection.repo.default_branch) + '/' +
+                encodePath(selected.path.startsWith(PUBLIC_FOLDER + '/')
+                  ? 'public-files' + selected.path.slice(PUBLIC_FOLDER.length)
+                  : '.vault/state.json')}
                 target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-1.5 text-xs text-accent hover:underline">
-                <GitBranch size={14} /> File history <ExternalLink size={12} />
+                <GitBranch size={14} /> {selected.path.startsWith(PUBLIC_FOLDER + '/') ? 'Public file history' : 'Encrypted vault history'} <ExternalLink size={12} />
               </a>
             </div>
             {error && <p role="alert" className="border-t border-red-200 bg-red-50 px-5 py-3 text-xs text-red-900">{error}</p>}

@@ -3,6 +3,9 @@ name: Pages
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - ".vault/**"
+      - "public-files/**"
   workflow_dispatch:
 
 permissions:
@@ -30,6 +33,7 @@ jobs:
       - run: npm run check
         env:
           GITHUB_PAGES: 'true'
+          VITE_DEFAULT_STORAGE_REPO: ${{ github.repository }}
           VITE_GITHUB_CLIENT_ID: ${{ vars.VITE_GITHUB_CLIENT_ID }}
           VITE_GITHUB_OAUTH_EXCHANGE_URL: ${{ vars.VITE_GITHUB_OAUTH_EXCHANGE_URL }}
       - uses: actions/configure-pages@v5

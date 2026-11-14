@@ -26,6 +26,10 @@ export function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+export class GitHubError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 export class GitHubDrive {
   private readonly base: string;
 
@@ -51,7 +55,7 @@ export class GitHubDrive {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(`${error.message || 'GitHub request failed'} (HTTP ${response.status})`);
+      throw new GitHubError(`${error.message || 'GitHub request failed'} (HTTP ${response.status})`, response.status);
     }
     return response;
   }
@@ -81,6 +85,16 @@ export class GitHubDrive {
     await this.delete(files[0].path, files[0].sha);
   }
 
+  async stat(path: string, branch: string): Promise<Entry | null> {
+    try {
+      const response = await this.request(`/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`);
+      return response.json() as Promise<Entry>;
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
   async read(path: string, branch: string): Promise<Blob> {
     const response = await this.request(
       `/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`,
@@ -89,9 +103,9 @@ export class GitHubDrive {
     return response.blob();
   }
 
-  async write(path: string, bytes: Uint8Array, sha?: string): Promise<void> {
+  async write(path: string, bytes: Uint8Array, sha?: string): Promise<string | undefined> {
     if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new Error('Files must be under 10 MiB.');
-    await this.request(`/contents/${encodePath(path)}`, {
+    const response = await this.request(`/contents/${encodePath(path)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -100,6 +114,8 @@ export class GitHubDrive {
         ...(sha ? { sha } : {}),
       }),
     });
+    const result = await response.json() as { content?: { sha?: string } };
+    return result.content?.sha;
   }
 
   async delete(path: string, sha: string): Promise<void> {
