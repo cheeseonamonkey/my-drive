@@ -1,0 +1,9 @@
+{
+  "name": "repodrive-auth",
+  "main": "index.ts",
+  "compatibility_date": "2026-11-01",
+  "vars": {
+    "GITHUB_CLIENT_ID": "YOUR_GITHUB_APP_CLIENT_ID",
+    "SITE_URL": "https://YOURNAME.github.io/YOUR-REPO/"
+  }
+}
