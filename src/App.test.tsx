@@ -40,7 +40,7 @@ async function connectToSetup() {
   fireEvent.change(screen.getByPlaceholderText('yourname/private-files'), { target: { value: 'test/files' } });
   fireEvent.change(screen.getByPlaceholderText('github_pat_…'), { target: { value: 'test-token' } });
   fireEvent.click(screen.getByRole('button', { name: /Open drive/i }));
-  await screen.findByText('Create your encrypted vault.');
+  await screen.findByText('Set up encrypted vault');
 }
 
 async function initializeVault() {
@@ -60,7 +60,7 @@ describe('first-run encrypted file manager', () => {
     const fetchMock = stubGithub();
     render(<App />);
     await connectToSetup();
-    expect(screen.getByText(/Git is forever-ish/)).toBeTruthy();
+    expect(screen.getByText(/Git history retains deleted files/)).toBeTruthy();
     expect(screen.queryByText('notes.md')).toBeNull();
     await initializeVault();
     expect(screen.getByText('1 files · 1 folders · 12 B in this folder')).toBeTruthy();

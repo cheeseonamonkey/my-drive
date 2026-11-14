@@ -5,61 +5,54 @@
 
 @theme {
   --font-sans: 'Rubik', ui-sans-serif, system-ui, sans-serif;
-  --color-paper: #faf9fc;
-  --color-ink: #272431;
-  --color-muted: #797580;
-  --color-line: #e9e6ee;
-  --color-accent: #6b48b2;
+  --color-paper: #fafafa;
+  --color-ink: #232323;
+  --color-muted: #717171;
+  --color-line: #e4e4e4;
+  --color-accent: #5c4b72;
 }
 
 :root { color: var(--color-ink); background: var(--color-paper); font-family: var(--font-sans); }
 button { cursor: pointer; }
-button:disabled { cursor: not-allowed; opacity: .48; }
+button:disabled { cursor: not-allowed; opacity: .5; }
 :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-::selection { background: #e6def7; color: #3d275d; }
+::selection { background: #e9e4ef; color: #2b2532; }
 
-.surface {
-  background: #fff;
-  border: 1px solid var(--color-line);
-  border-radius: 16px;
-  box-shadow: 0 3px 12px rgb(45 27 65 / 2.5%);
-}
+.surface { background: white; border: 1px solid var(--color-line); border-radius: 6px; }
 .action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 40px;
-  border-radius: 10px;
+  gap: 7px;
+  min-height: 42px;
   padding: 0 13px;
+  border-radius: 5px;
   font-size: 12px;
   font-weight: 500;
-  transition: background-color .15s, color .15s;
+  transition: background-color .12s;
 }
-.action-outline { background: #fff; border: 1px solid var(--color-line); color: var(--color-ink); }
-.action-outline:hover { background: #f6f4f9; }
-.action-primary { background: #3a3149; color: #fff; }
-.action-primary:hover { background: #574569; }
+.action-outline { background: white; border: 1px solid #dcdcdc; color: var(--color-ink); }
+.action-outline:hover { background: #f4f4f4; }
+.action-primary { background: #282828; color: white; }
+.action-primary:hover { background: #404040; }
 .pill {
-  min-height: 34px;
-  padding: 0 13px;
-  border-radius: 9px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 4px;
   font-size: 12px;
   color: var(--color-muted);
   white-space: nowrap;
-  transition: background-color .15s, color .15s;
 }
-.pill:hover { background: #f5f3f8; color: var(--color-ink); }
-.pill[aria-pressed="true"] { background: #eeeaf5; color: #4f367d; font-weight: 500; }
+.pill:hover { background: #f1f1f1; color: var(--color-ink); }
+.pill[aria-pressed="true"] { background: #ececec; color: var(--color-ink); font-weight: 500; }
 .field {
   min-height: 44px;
   width: 100%;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
+  border: 1px solid #dcdcdc;
+  border-radius: 5px;
   background: white;
-  padding: 0 13px;
+  padding: 0 12px;
   font-size: 13px;
-  outline: none;
 }
-.field:focus { border-color: #ac94d4; }
-.drop-target { outline: 2px dashed var(--color-accent); outline-offset: -8px; background: #f6f1ff; }
+.field:focus { border-color: #8e7e9b; outline: none; }
+.drop-target { outline: 2px dashed #8e7e9b; outline-offset: -6px; background: #f5f3f7; }

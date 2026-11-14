@@ -27,7 +27,7 @@ const categoryFilters: { value: FileCategory; label: string }[] = [
 ];
 
 function ItemIcon({ item, large = false }: { item: Entry; large?: boolean }) {
-  const size = large ? 27 : 21;
+  const size = large ? 24 : 20;
   const kind = category(item);
   const icon = kind === 'folder' ? <Folder size={size} /> :
     kind === 'images' ? <ImageIcon size={size} /> :
@@ -35,8 +35,8 @@ function ItemIcon({ item, large = false }: { item: Entry; large?: boolean }) {
     kind === 'code' ? <Code2 size={size} /> :
     ['zip', 'tar', 'gz', '7z', 'rar'].includes(extension(item.name)) ? <FileArchive size={size} /> :
     <File size={size} />;
-  return <span className={'flex shrink-0 items-center justify-center rounded-xl ' +
-    (large ? 'size-12' : 'size-10') + (kind === 'folder' ? ' bg-[#f0ebf9] text-accent' : ' bg-[#f6f5f8] text-[#8d8799]')}>
+  return <span className={'flex shrink-0 items-center justify-center ' +
+    (large ? 'size-10' : 'size-8') + (kind === 'folder' ? ' text-accent' : ' text-muted')}>
     {icon}
   </span>;
 }
@@ -53,9 +53,9 @@ function NameEditor({ title, value, onCancel, onSave }: {
 }) {
   const [name, setName] = useState(value);
   return (
-    <div className="fixed inset-0 z-60 flex items-center justify-center bg-[#201b2b]/35 p-4"
+    <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/30 p-4"
       onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
-      <form className="surface w-full max-w-sm p-5 shadow-xl" onSubmit={(event) => {
+      <form className="surface w-full max-w-sm p-5" onSubmit={(event) => {
         event.preventDefault();
         onSave(name.trim());
       }}>
@@ -373,52 +373,39 @@ export default function App() {
 
   return (
     <div className="min-h-dvh">
-      <header className="border-b border-line bg-white/90">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-7">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-9 items-center justify-center rounded-[11px] bg-[#3a3149] text-white"><HardDrive size={18} /></span>
-            <span className="text-[15px] font-semibold tracking-tight">RepoDrive</span>
-            <span className="hidden border-l border-line pl-3 text-xs text-muted sm:inline">Files, with a history.</span>
-          </div>
-          {connection ? (
-            <div className="flex items-center gap-2">
-              <span className="hidden items-center gap-1.5 rounded-full bg-[#f0f8f1] px-2.5 py-1.5 text-[11px] font-medium text-[#48744c] sm:inline-flex">
-                <span className="size-1.5 rounded-full bg-[#68a16f]" /> Connected
-              </span>
-              <button className="action action-outline !min-h-9 !px-3" onClick={disconnect}><LogOut size={15} /> Disconnect</button>
-            </div>
-          ) : (
-            <span className="flex items-center gap-1.5 text-xs text-muted"><LockKeyhole size={14} /> Encrypted by default</span>
+      <header className="border-b border-line bg-white">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
+          <span className="text-[15px] font-medium tracking-tight">My Drive</span>
+          {connection && (
+            <button className="action action-outline !min-h-9 !px-3" onClick={disconnect}>
+              <LogOut size={15} /> Disconnect
+            </button>
           )}
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pb-20 pt-8 sm:px-7 sm:pt-11">
+      <main className="mx-auto max-w-5xl px-4 pb-12 pt-7 sm:px-6 sm:pt-9">
         {!connection && pending ? (
-          <section className="mx-auto max-w-[460px] pt-2 sm:pt-7">
-            <div className="mb-5 flex size-12 items-center justify-center rounded-2xl bg-[#ece6f7] text-accent">
-              <LockKeyhole size={24} strokeWidth={1.7} />
-            </div>
-            <p className="mb-2 text-xs font-medium text-accent">{pending.exists ? 'Welcome back' : 'First-time setup'}</p>
-            <h1 className="text-[27px] font-semibold tracking-tight">
-              {pending.exists ? 'Unlock your encrypted drive.' : 'Create your encrypted vault.'}
+          <section className="mx-auto max-w-[460px] pt-2 sm:pt-6">
+            <h1 className="text-[23px] font-medium tracking-tight">
+              {pending.exists ? 'Unlock vault' : 'Set up encrypted vault'}
             </h1>
             <p className="mt-2 text-[13px] leading-6 text-muted">
               {pending.exists
-                ? 'Enter the vault password you created. Nothing is decrypted on GitHub.'
-                : 'Your files and folder names will be encrypted locally before reaching GitHub.'}
+                ? 'Enter your vault password to decrypt files locally.'
+                : 'Files and folder names are encrypted in your browser before upload.'}
             </p>
             {!pending.exists && (
-              <div className="surface mt-6 p-5">
-                <h2 className="mb-3 text-sm font-medium">How it works</h2>
-                <ol className="space-y-3 text-xs leading-5 text-muted">
-                  <li><strong className="mr-2 text-ink">1.</strong> Choose a long, unique password or passphrase.</li>
-                  <li><strong className="mr-2 text-ink">2.</strong> The browser generates a random salt and derives an encryption key with Argon2id.</li>
-                  <li><strong className="mr-2 text-ink">3.</strong> Upload into the encrypted drive. Only the separate <strong>Public files</strong> folder stays unencrypted.</li>
+              <div className="mt-6 border-y border-line py-4">
+                <h2 className="mb-3 text-xs font-medium">Before you start</h2>
+                <ol className="space-y-2 text-xs leading-5 text-muted">
+                  <li>1. Choose a unique password you can retain securely.</li>
+                  <li>2. The browser derives an encryption key using Argon2id and a random salt.</li>
+                  <li>3. Upload to the encrypted drive. Only <strong>Public files</strong> is unencrypted.</li>
                 </ol>
               </div>
             )}
-            <form className="surface mt-4 space-y-4 p-5 sm:p-6" onSubmit={(event) => { event.preventDefault(); void unlockVault(); }}>
+            <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void unlockVault(); }}>
               <label className="block">
                 <span className="mb-1.5 block text-xs font-medium">{pending.exists ? 'Vault password' : 'New vault password'}</span>
                 <input type="password" className="field" required autoComplete={pending.exists ? 'current-password' : 'new-password'}
@@ -433,11 +420,11 @@ export default function App() {
                 </label>
               )}
               {!pending.exists && (
-                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[#e7d8bb] bg-[#fffcf6] p-3.5">
-                  <input type="checkbox" className="mt-1 accent-[#6b48b2]" checked={acknowledged}
+                <label className="flex cursor-pointer items-start gap-2.5 border-l-2 border-[#9b845e] bg-[#f6f5f2] p-3">
+                  <input type="checkbox" className="mt-1 accent-[#5c4b72]" checked={acknowledged}
                     onChange={(event) => setAcknowledged(event.target.checked)} />
-                  <span className="text-[11px] leading-5 text-[#78634a]">
-                    <strong>Git is forever-ish.</strong> Deleted files may persist in Git history.
+                  <span className="text-xs leading-5 text-[#5b5146]">
+                    <strong>Git history retains deleted files.</strong>
                     I understand that public uploads are never encrypted, and losing my password
                     permanently loses access to encrypted files. There is no password reset.
                   </span>
@@ -447,26 +434,19 @@ export default function App() {
                 <LockKeyhole size={16} /> {busy || (pending.exists ? 'Unlock drive' : 'Create encrypted drive')}
               </button>
             </form>
-            <p className="mt-4 text-center text-[11px] leading-5 text-muted">
-              Passwords and encryption keys stay in the browser, never in GitHub secrets.
+            <p className="mt-4 text-xs leading-5 text-muted">
+              The encryption password and key remain in your browser.
             </p>
-            <button className="mx-auto mt-3 flex min-h-10 items-center gap-2 text-xs text-muted hover:text-ink"
-              onClick={disconnect}><ArrowLeft size={14} /> Back to repository login</button>
+            <button className="mt-3 flex min-h-10 items-center gap-2 text-xs text-muted hover:text-ink"
+              onClick={disconnect}><ArrowLeft size={14} /> Back</button>
           </section>
         ) : !connection ? (
-          <section className="mx-auto max-w-[440px] pt-3 sm:pt-9">
-            <span className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-[#ece6f7] text-accent">
-              <Folder size={24} strokeWidth={1.7} />
-            </span>
-            <h1 className="text-[27px] font-semibold tracking-tight sm:text-[34px]">Your files, minus the fuss.</h1>
-            <p className="mt-2.5 text-[13px] leading-6 text-muted">
-              A small encrypted file manager backed by GitHub. Connect to a repository, then create or unlock your vault.
+          <section className="mx-auto max-w-[440px] pt-3 sm:pt-7">
+            <h1 className="text-[23px] font-medium tracking-tight">Connect to GitHub</h1>
+            <p className="mt-2 text-[13px] leading-6 text-muted">
+              Connect to the storage repository. If no vault exists, setup starts automatically.
             </p>
-            <div className="mt-5 rounded-xl border border-line bg-white px-4 py-3 text-xs leading-5 text-muted">
-              <strong className="text-ink">First time?</strong> Connect to the repository hosting your personal drive.
-              After GitHub login, you'll get step-by-step vault setup. No password needs to be sent to GitHub.
-            </div>
-            <form className="surface mt-7 space-y-4 p-5 sm:p-6" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
+            <form className="mt-6 space-y-4" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
               <label className="block">
                 <span className="mb-1.5 block text-xs font-medium">Storage repository</span>
                 <input className="field" placeholder="yourname/private-files" required value={repository}
@@ -478,7 +458,7 @@ export default function App() {
                   <GitBranch size={17} /> Continue with GitHub
                 </button>
               )}
-              {oauthToken && <div className="flex items-center gap-2 rounded-xl bg-[#f1f8f3] px-3 py-2.5 text-xs text-[#3e7650]">
+              {oauthToken && <div className="flex items-center gap-2 text-xs text-muted">
                 <Check size={16} /> Authorized with GitHub for this session
               </div>}
               {!oauthToken && (
@@ -511,35 +491,35 @@ export default function App() {
                   className="font-medium text-accent underline underline-offset-2">Create a token</a>
               </p>
             </form>
-            <p className="mt-5 text-center text-[11px] leading-5 text-muted">
-              No tracking or saved credentials. Refreshing the tab disconnects you.
+            <p className="mt-5 text-xs leading-5 text-muted">
+              Credentials are held in memory. Refresh to disconnect.
             </p>
           </section>
         ) : (
           <section onDragEnter={onDragEnter} onDragLeave={onDragLeave} onDragOver={(event) => {
             if (dragging) event.preventDefault();
-          }} onDrop={onDrop} className={'relative rounded-2xl transition ' + (dragging ? 'drop-target' : '')}>
-            {dragging && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[#f6f1ff]/95">
+          }} onDrop={onDrop} className={'relative transition ' + (dragging ? 'drop-target' : '')}>
+            {dragging && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-paper/95">
               <div className="flex flex-col items-center gap-2 text-accent"><Upload size={30} /><span className="text-sm font-medium">Drop to upload here</span></div>
             </div>}
             {path === PUBLIC_FOLDER || path.startsWith(PUBLIC_FOLDER + '/') ? (
-              <div className="mb-4 rounded-xl border border-[#e7d8bb] bg-[#fffcf6] px-4 py-3 text-xs leading-5 text-[#78634a]">
+              <div className="mb-5 border-l-2 border-[#9b845e] bg-[#f6f5f2] px-3 py-2.5 text-xs leading-5 text-[#5b5146]">
                 <strong>Public and unencrypted.</strong> Everything uploaded here is readable if this repository is public,
                 and deletion does not erase its Git history.
               </div>
             ) : (
-              <div className="mb-4 flex items-center gap-1.5 text-[11px] text-[#4b7351]">
-                <LockKeyhole size={13} /> Encrypted locally · Argon2id + AES-256-GCM
+              <div className="mb-4 flex items-center gap-1.5 text-xs text-muted">
+                <LockKeyhole size={13} /> Encrypted · AES-256-GCM
               </div>
             )}
-            <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
               <div className="min-w-0">
                 <a href={'https://github.com/' + connection.repo.full_name} target="_blank" rel="noopener noreferrer"
                   className="inline-flex max-w-full items-center gap-1.5 text-[11px] font-medium text-muted hover:text-accent">
                   <GitBranch size={13} /><span className="truncate">{connection.repo.full_name}</span><ExternalLink size={12} />
                 </a>
-                <h1 className="mt-2 truncate text-[26px] font-semibold tracking-tight sm:text-[31px]">
-                  {path ? segments.at(-1) : 'My files'}
+                <h1 className="mt-1 truncate text-[23px] font-medium tracking-tight sm:text-[26px]">
+                  {path ? segments.at(-1) : 'Files'}
                 </h1>
                 <p className="mt-1.5 text-xs text-muted">
                   {fileCount} files · {folderCount} folders · {readableSize(folderBytes)} in this folder
@@ -565,29 +545,29 @@ export default function App() {
 
             <div className="surface overflow-hidden">
               <div className="flex min-h-13 flex-wrap items-center gap-1 border-b border-line px-3 py-2 sm:px-4">
-                <button className="flex min-h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-medium text-accent hover:bg-paper"
+                <button className="flex min-h-9 shrink-0 items-center gap-1 rounded-[4px] px-2.5 text-xs font-medium text-accent hover:bg-paper"
                   onClick={() => navigate('')}><HardDrive size={14} /> Files</button>
                 {segments.map((segment, index) => (
                   <div className="flex min-w-0 items-center" key={index}>
                     <ChevronRight size={13} className="shrink-0 text-muted" />
-                    <button className="max-w-36 truncate rounded-lg px-2 py-2 text-xs hover:bg-paper sm:max-w-52"
+                    <button className="max-w-36 truncate rounded-[4px] px-2 py-2 text-xs hover:bg-paper sm:max-w-52"
                       onClick={() => navigate(segments.slice(0, index + 1).join('/'))}>{segment}</button>
                   </div>
                 ))}
-                <span className="ml-auto flex items-center gap-1.5 rounded-lg bg-[#f5f4f7] px-2.5 py-1.5 text-[10px] text-muted">
+                <span className="ml-auto flex items-center gap-1.5 text-[10px] text-muted">
                   <GitBranch size={12} /><span className="max-w-20 truncate">{connection.repo.default_branch}</span>
                 </span>
               </div>
 
               <div className="flex flex-col gap-3 px-3 py-3 sm:px-4">
                 <div className="flex gap-2">
-                  <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-[10px] border border-line bg-paper px-3 sm:max-w-sm">
+                  <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 border-b border-line px-2 sm:max-w-sm">
                     <Search size={16} className="shrink-0 text-muted" />
                     <input className="w-full min-w-0 bg-transparent text-xs outline-none" value={filter}
                       placeholder="Search this folder…" aria-label="Filter this folder" onChange={(event) => setFilter(event.target.value)} />
                     {filter && <button aria-label="Clear search" onClick={() => setFilter('')}><X size={15} className="text-muted" /></button>}
                   </label>
-                  <button className="flex size-10 shrink-0 items-center justify-center rounded-[10px] border border-line hover:bg-paper"
+                  <button className="flex size-10 shrink-0 items-center justify-center border border-line hover:bg-paper"
                     title="Refresh" aria-label="Refresh folder" disabled={!!busy} onClick={refresh}><RefreshCw size={16} /></button>
                 </div>
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
@@ -600,7 +580,7 @@ export default function App() {
                   <div className="ml-auto flex shrink-0 items-center gap-1">
                     <label className="relative flex items-center">
                       <span className="sr-only">Sort files</span>
-                      <select className="min-h-9 appearance-none rounded-lg bg-white pl-2 pr-6 text-[11px] text-muted outline-none"
+                      <select className="min-h-9 appearance-none rounded-[4px] bg-white pl-2 pr-6 text-[11px] text-muted outline-none"
                         value={sort} onChange={(event) => setSort(event.target.value as FileSort)}>
                         <option value="name">Name</option>
                         <option value="type">Type</option>
@@ -624,21 +604,20 @@ export default function App() {
               {loading ? (
                 <div className="py-18 text-center text-xs text-muted">Loading files…</div>
               ) : shown.length === 0 ? (
-                <div className="px-5 py-17 text-center">
-                  <Folder size={30} strokeWidth={1.5} className="mx-auto mb-3 text-[#ad9bcf]" />
-                  <p className="text-sm font-medium">{items.length ? 'Nothing matches' : 'Nothing here yet'}</p>
-                  <p className="mt-1.5 text-xs text-muted">{items.length ? 'Try a different filter.' : 'Upload something or create a folder.'}</p>
+                <div className="px-5 py-12 text-center">
+                  <p className="text-sm font-medium">{items.length ? 'Nothing matches' : 'Empty folder'}</p>
+                  <p className="mt-1.5 text-xs text-muted">{items.length ? 'Try a different filter.' : 'Upload a file or create a folder.'}</p>
                   {!items.length && path && path !== PUBLIC_FOLDER && <button className="action action-outline mt-5" onClick={removeEmptyFolder} disabled={!!busy}>Remove empty folder</button>}
                 </div>
               ) : view === 'list' ? (
                 <div>
-                  <div className="hidden grid-cols-[minmax(0,1fr)_minmax(100px,180px)_95px_24px] gap-3 border-b border-line bg-[#fbfafc] px-5 py-3 text-[10px] uppercase tracking-wider text-muted sm:grid">
+                  <div className="hidden grid-cols-[minmax(0,1fr)_minmax(100px,180px)_95px_24px] gap-3 border-b border-line bg-paper px-4 py-2.5 text-[10px] uppercase tracking-wider text-muted sm:grid">
                     <span>Name</span><span>Type</span><span className="text-right">Size</span><span />
                   </div>
                   <div className="divide-y divide-line">
                     {shown.map((item) => (
                       <button key={item.path} disabled={!!busy} onClick={() => open(item)}
-                        className="grid min-h-17 w-full grid-cols-[minmax(0,1fr)_20px] items-center gap-3 px-3 py-2.5 text-left transition hover:bg-[#faf9fc] sm:grid-cols-[minmax(0,1fr)_minmax(100px,180px)_95px_24px] sm:px-5">
+                        className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_20px] items-center gap-2 px-3 py-2 text-left hover:bg-paper sm:grid-cols-[minmax(0,1fr)_minmax(100px,180px)_95px_24px] sm:px-4">
                         <span className="flex min-w-0 items-center gap-3">
                           <ItemIcon item={item} />
                           <span className="min-w-0">
@@ -652,18 +631,18 @@ export default function App() {
                         <span className="hidden text-right text-xs tabular-nums text-muted sm:block">
                           {item.type === 'file' ? readableSize(item.size) : '—'}
                         </span>
-                        <ChevronRight size={17} className="text-[#b0aab8]" />
+                        <ChevronRight size={17} className="text-muted" />
                       </button>
                     ))}
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3 border-t border-line p-3 sm:grid-cols-3 sm:p-5 lg:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 border-t border-line p-3 sm:grid-cols-3 sm:p-4 lg:grid-cols-4">
                   {shown.map((item) => (
                     <button key={item.path} disabled={!!busy} onClick={() => open(item)}
-                      className="flex min-h-38 min-w-0 flex-col items-start rounded-xl border border-line p-3.5 text-left hover:bg-[#faf9fc]">
+                      className="flex min-h-32 min-w-0 flex-col items-start border border-line p-3 text-left hover:bg-paper">
                       <ItemIcon item={item} large />
-                      <span className="mt-4 w-full truncate text-xs font-medium">{item.name}</span>
+                      <span className="mt-3 w-full truncate text-xs font-medium">{item.name}</span>
                       <span className="mt-1.5 w-full truncate text-[10px] text-muted">
                         {typeLabel(item)}{item.type === 'file' ? ' · ' + readableSize(item.size) : ''}
                       </span>
@@ -685,20 +664,20 @@ export default function App() {
           </section>
         )}
 
-        {error && <div role="alert" className="mt-5 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900">
+        {error && <div role="alert" className="mt-5 flex items-start justify-between gap-3 border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900">
           <span className="break-words">{error}</span>
           <button className="shrink-0" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button>
         </div>}
       </main>
 
       {selected && connection && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-[#201b2b]/30" role="presentation"
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/30" role="presentation"
           onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
-          <section className="flex h-dvh w-full max-w-lg flex-col bg-white shadow-2xl" role="dialog" aria-modal="true"
+          <section className="flex h-dvh w-full max-w-lg flex-col border-l border-line bg-white" role="dialog" aria-modal="true"
             aria-label={'File details: ' + selected.name}>
             <header className="flex min-h-16 items-center gap-3 border-b border-line px-4 sm:px-6">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">File details</span>
-              <button className="flex size-10 items-center justify-center rounded-lg hover:bg-paper" aria-label="Close details"
+              <button className="flex size-10 items-center justify-center rounded-[4px] hover:bg-paper" aria-label="Close details"
                 onClick={() => setSelected(null)}><X size={19} /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-auto p-5 sm:p-6">
@@ -710,10 +689,10 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="min-h-24 overflow-auto rounded-xl border border-line bg-paper p-3">
+              <div className="min-h-24 overflow-auto border border-line bg-paper p-3">
                 {preview.kind === 'loading' && <p className="py-10 text-center text-xs text-muted">Loading preview…</p>}
                 {preview.kind === 'image' && <img src={preview.value} alt={selected.name}
-                  className="mx-auto max-h-[42dvh] max-w-full rounded-lg object-contain" />}
+                  className="mx-auto max-h-[42dvh] max-w-full rounded-[4px] object-contain" />}
                 {preview.kind === 'text' && <pre className="max-h-[42dvh] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5">{preview.value}</pre>}
                 {preview.kind === 'other' && <p className="py-10 text-center text-xs text-muted">No preview available. Download to open.</p>}
                 {preview.kind === 'error' && <p className="py-10 text-center text-xs text-red-700">Preview failed: {preview.value}</p>}
@@ -768,7 +747,7 @@ export default function App() {
           title={nameDialog.type === 'folder' ? 'New folder' : 'Rename file'}
           value={nameDialog.item?.name || ''} onCancel={() => setNameDialog(null)} onSave={saveName} />
       )}
-      <footer className="pb-7 text-center text-[11px] text-muted">Small files. Real history. Built on GitHub.</footer>
+
     </div>
   );
 }
