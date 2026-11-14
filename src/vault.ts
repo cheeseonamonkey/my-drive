@@ -190,8 +190,19 @@ export class VaultDrive {
     if (typeof localStorage !== 'undefined') localStorage.removeItem(this.checkpointKey);
   }
 
+  private isPublished(checkpoint: UploadCheckpoint): boolean {
+    const file = this.record(checkpoint.path);
+    return file?.storage === 'r2' && file.size === checkpoint.size &&
+      file.blocks.length === checkpoint.blocks.length &&
+      file.blocks.every((id, index) => id === checkpoint.blocks[index]?.id);
+  }
+
   async pendingUpload(): Promise<{ path: string; done: number; total: number } | null> {
     const checkpoint = await this.readCheckpoint();
+    if (checkpoint && this.isPublished(checkpoint)) {
+      this.clearCheckpoint();
+      return null;
+    }
     return checkpoint ? {
       path: checkpoint.path,
       done: Math.min(checkpoint.size,
@@ -342,12 +353,19 @@ export class VaultDrive {
     }
 
     // Only publish the complete file. Interrupted uploads remain invisible in the vault index.
+    signal?.throwIfAborted();
     const entries = this.index.entries.filter((item) => item.path !== path);
     entries.push({
       id: randomId(), path, type: 'file', size: file.size,
       blocks: checkpoint.blocks.map((part) => part.id), storage: 'r2',
     });
-    await this.persist(entries);
+    try {
+      await this.persist(entries);
+    } catch (error) {
+      // The commit may have succeeded even when its HTTP response was lost.
+      try { await this.reload(); } catch { /* Keep the original error. */ }
+      if (!this.isPublished(checkpoint)) throw error;
+    }
     this.clearCheckpoint();
     if (previous && previous.storage !== 'r2') await this.cleanup(previous.blocks);
   }

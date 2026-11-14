@@ -6,6 +6,7 @@ import { offerToSaveVaultPassword } from './browser-password';
 
 vi.mock('./browser-password', () => ({ offerToSaveVaultPassword: vi.fn() }));
 
+const driveFailure = vi.hoisted(() => ({ upload: false }));
 vi.mock('./vault', () => {
   class FakeVaultDrive {
     static async exists() { return false; }
@@ -18,6 +19,13 @@ vi.mock('./vault', () => {
       ];
     }
     async read() { return new Blob(['hello']); }
+    get maxUploadBytes() { return 10 * 1024 * 1024; }
+    async writeFile() {
+      if (driveFailure.upload) throw new Error('Simulated network failure.');
+    }
+    async downloadTo(_path: string, onChunk: (data: Uint8Array) => Promise<void>) {
+      await onChunk(new Uint8Array([65, 66, 67]));
+    }
   }
   return { VaultDrive: FakeVaultDrive, PUBLIC_FOLDER: 'Public files' };
 });
@@ -26,6 +34,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  driveFailure.upload = false;
 });
 
 function stubGithub() {
@@ -73,7 +82,7 @@ describe('first-run encrypted file manager', () => {
     expect(screen.queryByText('notes.md')).toBeNull();
     await initializeVault();
     expect(offerToSaveVaultPassword).toHaveBeenCalledWith('test/files', 'a secure example password');
-    expect(screen.getByText('1 files · 1 folders · 12 B in this folder')).toBeTruthy();
+    expect(screen.getByText('1 file · 1 folder · 12 B')).toBeTruthy();
     fireEvent.click(screen.getByText('notes.md'));
     await screen.findByText('Location');
     expect(screen.getByText('abcde12345')).toBeTruthy();
@@ -98,6 +107,45 @@ describe('first-run encrypted file manager', () => {
     await screen.findByText('notes.md');
     expect(offerToSaveVaultPassword).toHaveBeenCalledWith('test/files', 'password provided by autofill');
   });
+  it('keeps upload errors visible after a folder refresh', async () => {
+    stubGithub();
+    driveFailure.upload = true;
+    render(<App />);
+    await connectToSetup();
+    await initializeVault();
+    fireEvent.change(screen.getByLabelText('Upload files'), {
+      target: { files: [new File(['data'], 'broken.txt')] },
+    });
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Simulated network failure.'));
+  });
+
+  it('opens the native save picker with the correct browser receiver', async () => {
+    stubGithub();
+    const writes: number[] = [];
+    const picker = vi.fn(function (this: Window) {
+      if (this !== window) throw new TypeError('Illegal invocation');
+      return Promise.resolve({
+        createWritable: async () => ({
+          write: async (data: Uint8Array) => { writes.push(...data); },
+          close: async () => {},
+          abort: async () => {},
+        }),
+      });
+    });
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: picker });
+    try {
+      render(<App />);
+      await connectToSetup();
+      await initializeVault();
+      fireEvent.click(screen.getByText('notes.md'));
+      await screen.findByText('Location');
+      fireEvent.click(screen.getByRole('button', { name: /Download/ }));
+      await waitFor(() => expect(writes).toEqual([65, 66, 67]));
+    } finally {
+      Reflect.deleteProperty(window, 'showSaveFilePicker');
+    }
+  });
+
   it('disconnects without retaining credentials', async () => {
     stubGithub();
     render(<App />);

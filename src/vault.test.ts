@@ -26,6 +26,7 @@ afterAll(() => {
 class MemoryGithub {
   files = new Map<string, { bytes: Uint8Array; sha: string }>();
   seq = 0;
+  loseManifestResponse = false;
   async stat(path: string): Promise<Entry | null> {
     const file = this.files.get(path);
     return file ? { name: path.split('/').at(-1)!, path, type: 'file', size: file.bytes.length, sha: file.sha } : null;
@@ -35,6 +36,10 @@ class MemoryGithub {
     if ((previous && previous.sha !== expected) || (!previous && expected)) throw new Error('Concurrent write conflict');
     const sha = String(++this.seq);
     this.files.set(path, { bytes: new Uint8Array(bytes), sha });
+    if (path === VAULT_FILE && expected && this.loseManifestResponse) {
+      this.loseManifestResponse = false;
+      throw new Error('Network lost after GitHub committed the index.');
+    }
     return sha;
   }
   async read(path: string): Promise<Blob> {
@@ -196,6 +201,29 @@ describe('large uploads and recovery', () => {
     await reopened.delete(renamed.path, renamed.sha);
     expect(remote.blobs.size).toBe(2); // History may still reference those blocks.
   }, 20_000);
+
+  it('recognizes a completed upload even if the final commit acknowledgement is lost', async () => {
+    pending.clear();
+    const github = new MemoryGithub();
+    const remote = new MemoryRemote();
+    const api = asApi(github);
+    const password = 'an example passphrase for final-commit recovery';
+    const vault = await VaultDrive.create(api, 'main', password, remote as unknown as RemoteBlockStore);
+    github.loseManifestResponse = true;
+    const input = new File(['encrypted private data'], 'critical.txt');
+    // Simulate a crash that prevented the final local checkpoint removal.
+    const removeItem = localStorage.removeItem;
+    localStorage.removeItem = () => {};
+    try { await vault.writeFile('critical.txt', input); }
+    finally { localStorage.removeItem = removeItem; }
+    expect((await vault.list('', 'main')).some((entry) => entry.name === 'critical.txt')).toBe(true);
+    expect(remote.blobs.size).toBe(1);
+    expect(pending.size).toBe(1);
+    // A future session recognizes the published blocks and clears the stale checkpoint.
+    const reopened = await VaultDrive.unlock(api, 'main', password, remote as unknown as RemoteBlockStore);
+    expect(await reopened.pendingUpload()).toBeNull();
+    expect(pending.size).toBe(0);
+  });
 
   it('reloads concurrent encrypted manifest changes without replacing them', async () => {
     pending.clear();

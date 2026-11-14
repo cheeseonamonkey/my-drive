@@ -136,8 +136,6 @@ export default function App() {
     if (!connection) return;
     let active = true;
     setLoading(true);
-    setError('');
-    setItems([]);
     connection.api.list(path, connection.repo.default_branch)
       .then((entries) => { if (active) setItems(entries); })
       .catch((reason: unknown) => { if (active) setError(formatError(reason)); })
@@ -251,9 +249,11 @@ export default function App() {
   }
 
   function navigate(next: string) {
+    setError('');
     setFilter('');
     setTypeFilter('all');
     setSelected(null);
+    if (next !== path) setItems([]);
     setPath(next);
   }
 
@@ -275,6 +275,7 @@ export default function App() {
     void perform('Uploading…', async () => {
       try {
         for (const file of files) {
+          controller.signal.throwIfAborted();
           if (!validName(file.name)) throw new Error('Invalid filename: ' + file.name);
           const max = publicUpload ? MAX_UPLOAD_BYTES : connection.api.maxUploadBytes;
           if (file.size > max) {
@@ -385,7 +386,7 @@ export default function App() {
     void perform('Downloading…', async () => {
       if (picker && !item.path.startsWith(PUBLIC_FOLDER + '/')) {
         let handle: SaveHandle;
-        try { handle = await picker({ suggestedName: item.name }); }
+        try { handle = await picker.call(window, { suggestedName: item.name }); }
         catch (error) {
           if ((error as DOMException).name === 'AbortError') return;
           throw error;
@@ -447,7 +448,7 @@ export default function App() {
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
           <span className="text-[15px] font-medium tracking-tight">My Drive</span>
           {connection && (
-            <button className="action action-outline !min-h-9 !px-3" onClick={disconnect}>
+            <button className="action action-outline !min-h-9 !px-3" disabled={!!busy} onClick={disconnect}>
               <LogOut size={15} /> Disconnect
             </button>
           )}
@@ -455,6 +456,14 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pb-12 pt-7 sm:px-6 sm:pt-9">
+        {error && !selected && (
+          <div role="alert" className="sticky top-2 z-30 mb-5 flex items-start justify-between gap-3 border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900">
+            <span className="min-w-0 break-words">{error}</span>
+            <button className="shrink-0" aria-label="Dismiss error" onClick={() => setError('')}>
+              <X size={16} />
+            </button>
+          </div>
+        )}
         {!connection && pending ? (
           <section className="mx-auto max-w-[460px] pt-2 sm:pt-6">
             <h1 className="text-[23px] font-medium tracking-tight">
@@ -597,7 +606,7 @@ export default function App() {
                   {path ? segments.at(-1) : 'Files'}
                 </h1>
                 <p className="mt-1.5 text-xs text-muted">
-                  {fileCount} files · {folderCount} folders · {readableSize(folderBytes)} in this folder
+                  {fileCount} {fileCount === 1 ? 'file' : 'files'} · {folderCount} {folderCount === 1 ? 'folder' : 'folders'} · {readableSize(folderBytes)}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -638,7 +647,13 @@ export default function App() {
                   <span className="shrink-0 tabular-nums">
                     {readableSize(uploadProgress.done)} / {readableSize(uploadProgress.total)}
                   </span>
-                  <button className="shrink-0 underline" onClick={() => uploadController.current?.abort()}>Cancel</button>
+                  {uploadProgress.done >= uploadProgress.total ? (
+                    <span className="shrink-0 text-muted">Finalizing…</span>
+                  ) : (
+                    <button className="shrink-0 underline" onClick={() => uploadController.current?.abort()}>
+                      {connection.api.maxUploadBytes > MAX_UPLOAD_BYTES ? 'Cancel' : 'Stop after file'}
+                    </button>
+                  )}
                 </div>
                 <progress className="mt-2 h-1.5 w-full accent-accent" max={Math.max(1, uploadProgress.total)}
                   value={uploadProgress.done} aria-label="Upload progress" />
@@ -704,7 +719,12 @@ export default function App() {
                 </div>
               </div>
 
-              {loading ? (
+              {loading && items.length > 0 && (
+                <div role="status" className="border-t border-line px-4 py-1.5 text-[11px] text-muted">
+                  Refreshing files…
+                </div>
+              )}
+              {loading && !items.length ? (
                 <div className="py-18 text-center text-xs text-muted">Loading files…</div>
               ) : shown.length === 0 ? (
                 <div className="px-5 py-12 text-center">
@@ -719,7 +739,7 @@ export default function App() {
                   </div>
                   <div className="divide-y divide-line">
                     {shown.map((item) => (
-                      <button key={item.path} disabled={!!busy} onClick={() => open(item)}
+                      <button key={item.path} disabled={!!busy || loading} onClick={() => open(item)}
                         className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_20px] items-center gap-2 px-3 py-2 text-left hover:bg-paper sm:grid-cols-[minmax(0,1fr)_minmax(100px,180px)_95px_24px] sm:px-4">
                         <span className="flex min-w-0 items-center gap-3">
                           <ItemIcon item={item} />
@@ -742,7 +762,7 @@ export default function App() {
               ) : (
                 <div className="grid grid-cols-2 gap-2 border-t border-line p-3 sm:grid-cols-3 sm:p-4 lg:grid-cols-4">
                   {shown.map((item) => (
-                    <button key={item.path} disabled={!!busy} onClick={() => open(item)}
+                    <button key={item.path} disabled={!!busy || loading} onClick={() => open(item)}
                       className="flex min-h-32 min-w-0 flex-col items-start border border-line p-3 text-left hover:bg-paper">
                       <ItemIcon item={item} large />
                       <span className="mt-3 w-full truncate text-xs font-medium">{item.name}</span>
@@ -753,26 +773,26 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {items.length >= 1000 && <p className="border-t border-line px-4 py-3 text-xs text-muted">
-                GitHub only returns the first 1,000 entries per folder.
-              </p>}
+              {items.length >= 1000 && (path === PUBLIC_FOLDER || path.startsWith(PUBLIC_FOLDER + '/')) && (
+                <p className="border-t border-line px-4 py-3 text-xs text-muted">
+                  GitHub only returns the first 1,000 entries per folder.
+                </p>
+              )}
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
               {path ? <button className="flex min-h-10 items-center gap-1.5 hover:text-ink"
                 onClick={() => navigate(segments.slice(0, -1).join('/'))}><ArrowLeft size={14} /> Parent folder</button> :
                 <span>{shown.length} items shown</span>}
-              <span>{connection.api.maxUploadBytes > MAX_UPLOAD_BYTES
-                ? 'R2 large-file storage · Encrypted'
-                : '10 MiB limit · Configure R2 for larger files'}</span>
+              <span>{path === PUBLIC_FOLDER || path.startsWith(PUBLIC_FOLDER + '/')
+                ? 'Public · 10 MiB max'
+                : connection.api.maxUploadBytes > MAX_UPLOAD_BYTES
+                  ? 'Encrypted · R2 storage'
+                  : 'Encrypted · 10 MiB max'}</span>
             </div>
           </section>
         )}
 
-        {error && <div role="alert" className="mt-5 flex items-start justify-between gap-3 border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900">
-          <span className="break-words">{error}</span>
-          <button className="shrink-0" aria-label="Dismiss error" onClick={() => setError('')}><X size={16} /></button>
-        </div>}
       </main>
 
       {selected && connection && (
@@ -817,12 +837,20 @@ export default function App() {
                   <dt className="text-muted">Size</dt><dd>{readableSize(selected.size)} ({selected.size.toLocaleString()} bytes)</dd>
                 </div>
                 <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 py-3">
-                  <dt className="text-muted">Version</dt><dd className="break-all font-mono text-[11px]">{selected.sha.slice(0, 12)}</dd>
+                  <dt className="text-muted">{selected.path.startsWith(PUBLIC_FOLDER + '/') ? 'Git SHA' : 'File ID'}</dt>
+                  <dd className="break-all font-mono text-[11px]">{selected.sha.slice(0, 12)}</dd>
                 </div>
                 <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 py-3">
                   <dt className="text-muted">Repository</dt><dd className="break-all">{connection.repo.full_name}</dd>
                 </div>
               </dl>
+              {selected.size > 64 * 1024 * 1024 &&
+                !selected.path.startsWith(PUBLIC_FOLDER + '/') &&
+                typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker !== 'function' && (
+                <p className="mt-4 text-xs leading-5 text-muted">
+                  This browser cannot save files over 64 MiB. Use a desktop Chromium browser for streamed downloads.
+                </p>
+              )}
               <a href={'https://github.com/' + connection.repo.full_name + '/commits/' +
                 encodeURIComponent(connection.repo.default_branch) + '/' +
                 encodePath(selected.path.startsWith(PUBLIC_FOLDER + '/')
@@ -839,7 +867,11 @@ export default function App() {
               <button className="action action-outline !px-2" disabled={!!busy} onClick={() => remove(selected)}>
                 <Trash2 size={15} /> Delete
               </button>
-              <button className="action action-primary !px-2" disabled={!!busy} onClick={() => download(selected)}>
+              <button className="action action-primary !px-2"
+                disabled={!!busy || (selected.size > 64 * 1024 * 1024 &&
+                  !selected.path.startsWith(PUBLIC_FOLDER + '/') &&
+                  typeof (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker !== 'function')}
+                onClick={() => download(selected)}>
                 <ArrowDownToLine size={15} /> Download
               </button>
             </div>

@@ -24,6 +24,7 @@ describe('file presentation', () => {
   it('displays file type and sizes', () => {
     expect(typeLabel(entry('worker.kt'))).toBe('Kotlin');
     expect(readableSize(1024)).toBe('1.0 KiB');
+    expect(readableSize(5 * 1024 ** 3)).toBe('5.0 GiB');
   });
 
   it('rejects invalid names', () => {
