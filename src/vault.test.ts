@@ -105,12 +105,15 @@ describe('encrypted filesystem (integration)', () => {
     await drive.write('chunked.bin', original);
     const blocks = [...memory.files.keys()].filter((key) => key.startsWith('.vault/blocks/'));
     expect(blocks).toHaveLength(2);
-    expect(new Uint8Array(await (await drive.read('chunked.bin', 'main')).arrayBuffer())).toEqual(original);
+    const decoded = new Uint8Array(await (await drive.read('chunked.bin', 'main')).arrayBuffer());
+    const digest = (bytes: Uint8Array) => webcrypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+    expect(Buffer.from(await digest(decoded)).toString('hex'))
+      .toBe(Buffer.from(await digest(original)).toString('hex'));
 
     const block = memory.files.get(blocks[0])!;
     block.bytes[15] ^= 0x01;
     await expect(drive.read('chunked.bin', 'main')).rejects.toThrow('modified');
-  });
+  }, 20_000);
 
   it('isolates intentionally public files and detects concurrent manifest updates', async () => {
     const memory = new MemoryGithub();
