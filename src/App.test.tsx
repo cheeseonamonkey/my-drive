@@ -2,6 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
 import App from './App';
+import { offerToSaveVaultPassword } from './browser-password';
+
+vi.mock('./browser-password', () => ({ offerToSaveVaultPassword: vi.fn() }));
 
 vi.mock('./vault', () => {
   class FakeVaultDrive {
@@ -21,6 +24,7 @@ vi.mock('./vault', () => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 function stubGithub() {
@@ -60,9 +64,14 @@ describe('first-run encrypted file manager', () => {
     const fetchMock = stubGithub();
     render(<App />);
     await connectToSetup();
+    const passwordField = screen.getByPlaceholderText('Enter a strong passphrase');
+    expect(passwordField.getAttribute('name')).toBe('password');
+    expect(passwordField.getAttribute('autocomplete')).toBe('new-password');
+    expect(screen.getByPlaceholderText('Enter the same passphrase again').getAttribute('autocomplete')).toBe('new-password');
     expect(screen.getByText(/Git history retains deleted files/)).toBeTruthy();
     expect(screen.queryByText('notes.md')).toBeNull();
     await initializeVault();
+    expect(offerToSaveVaultPassword).toHaveBeenCalledWith('test/files', 'a secure example password');
     expect(screen.getByText('1 files · 1 folders · 12 B in this folder')).toBeTruthy();
     fireEvent.click(screen.getByText('notes.md'));
     await screen.findByText('Location');
@@ -73,6 +82,21 @@ describe('first-run encrypted file manager', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+
+  it('accepts password manager autofill without a React input event', async () => {
+    stubGithub();
+    render(<App />);
+    await connectToSetup();
+    const input = screen.getByPlaceholderText('Enter a strong passphrase') as HTMLInputElement;
+    const confirmation = screen.getByPlaceholderText('Enter the same passphrase again') as HTMLInputElement;
+    // Native autofill can update DOM values without firing React's synthetic onChange.
+    input.value = 'password provided by autofill';
+    confirmation.value = input.value;
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /Create encrypted drive/i }));
+    await screen.findByText('notes.md');
+    expect(offerToSaveVaultPassword).toHaveBeenCalledWith('test/files', 'password provided by autofill');
+  });
   it('disconnects without retaining credentials', async () => {
     stubGithub();
     render(<App />);
@@ -95,6 +119,7 @@ describe('first-run encrypted file manager', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Create encrypted drive/i }));
     await screen.findByText('Please acknowledge the recovery and Git history warnings.');
+    expect(offerToSaveVaultPassword).not.toHaveBeenCalled();
     expect(screen.queryByText('notes.md')).toBeNull();
   });
 });

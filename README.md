@@ -10,7 +10,7 @@ A personal, browser-encrypted file manager hosted by GitHub Pages. Built from th
 2. Connect to the repository `cheeseonamonkey/my-drive` using a [fine-grained GitHub access token](https://github.com/settings/personal-access-tokens/new) with **Contents: Read and write** for this repository only. The token is kept in browser memory, never committed.
 3. On the first login, the site shows setup instructions. Create a **strong, unique vault password** (14+ characters), confirm it, and acknowledge the Git history and password recovery warning.
 4. Upload private files into the encrypted drive. Use the separate **Public files** folder only for material you deliberately want public.
-5. On subsequent visits, use the same vault password to unlock. Refreshing or disconnecting discards the key and GitHub token from the app session.
+5. On subsequent visits, use the same vault password to unlock. Your browser or password manager can offer to **save and autofill the vault password** (including on mobile). Saving is optional; the application does not persist it in localStorage, cookies, or the repository. Refreshing or disconnecting discards the live key and GitHub token from the app session.
 
 **No default password has been set.** The encryption salt and new vault are created in your browser the first time you complete setup. Do not send your password through chat or commit it anywhere.
 

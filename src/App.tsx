@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { encodePath, Entry, GitHubDrive, MAX_UPLOAD_BYTES, RepoDetails } from './github';
 import { PUBLIC_FOLDER, VaultDrive } from './vault';
+import { offerToSaveVaultPassword } from './browser-password';
 import { beginGitHubLogin, completeGitHubLogin, oauthEnabled } from './auth';
 import {
   category, entriesBy, extension, FileCategory, FileSort, PREVIEW_IMAGES, PREVIEW_TEXT,
@@ -78,8 +79,7 @@ export default function App() {
   const [oauthToken, setOauthToken] = useState('');
   const [connection, setConnection] = useState<Connection | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
-  const [vaultPassword, setVaultPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const vaultForm = useRef<HTMLFormElement>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [path, setPath] = useState('');
   const [items, setItems] = useState<Entry[]>([]);
@@ -211,20 +211,24 @@ export default function App() {
   }, []);
 
   async function unlockVault() {
-    if (!pending) return;
+    if (!pending || !vaultForm.current) return;
+    // Some password managers autofill without firing React change events.
+    const fields = new FormData(vaultForm.current);
+    const password = String(fields.get('password') || '');
+    const confirmation = String(fields.get('confirm-password') || '');
     if (!pending.exists) {
-      if (vaultPassword.length < 14) { setError('Use a password or passphrase of at least 14 characters.'); return; }
-      if (vaultPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
+      if (password.length < 14) { setError('Use a password or passphrase of at least 14 characters.'); return; }
+      if (password !== confirmation) { setError('Passwords do not match.'); return; }
       if (!acknowledged) { setError('Please acknowledge the recovery and Git history warnings.'); return; }
     }
     await perform(pending.exists ? 'Unlocking vault…' : 'Encrypting new vault…', async () => {
       const api = pending.exists
-        ? await VaultDrive.unlock(pending.github, pending.repo.default_branch, vaultPassword)
-        : await VaultDrive.create(pending.github, pending.repo.default_branch, vaultPassword);
+        ? await VaultDrive.unlock(pending.github, pending.repo.default_branch, password)
+        : await VaultDrive.create(pending.github, pending.repo.default_branch, password);
+      offerToSaveVaultPassword(pending.repo.full_name, password);
       setConnection({ api, repo: pending.repo });
       setPending(null);
-      setVaultPassword('');
-      setConfirmPassword('');
+      vaultForm.current?.reset();
       setAcknowledged(false);
       setPath('');
     });
@@ -359,8 +363,6 @@ export default function App() {
 
   function disconnect() {
     setPending(null);
-    setVaultPassword('');
-    setConfirmPassword('');
     setAcknowledged(false);
     setOauthToken('');
     setToken('');
@@ -405,18 +407,23 @@ export default function App() {
                 </ol>
               </div>
             )}
-            <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void unlockVault(); }}>
+            <form key={pending.repo.full_name + (pending.exists ? ':unlock' : ':setup')} ref={vaultForm}
+              className="mt-5 space-y-4" autoComplete="on"
+              onSubmit={(event) => { event.preventDefault(); void unlockVault(); }}>
+              <input type="text" id="vault-username" name="username" autoComplete="username" readOnly
+                value={pending.repo.full_name} className="sr-only" tabIndex={-1} aria-hidden="true" />
               <label className="block">
                 <span className="mb-1.5 block text-xs font-medium">{pending.exists ? 'Vault password' : 'New vault password'}</span>
-                <input type="password" className="field" required autoComplete={pending.exists ? 'current-password' : 'new-password'}
-                  value={vaultPassword} onChange={(event) => setVaultPassword(event.target.value)} placeholder="Enter a strong passphrase" />
+                <input type="password" id={pending.exists ? 'current-password' : 'new-password'}
+                  name="password" className="field" required
+                  autoComplete={pending.exists ? 'current-password' : 'new-password'}
+                  placeholder="Enter a strong passphrase" />
               </label>
               {!pending.exists && (
                 <label className="block">
                   <span className="mb-1.5 block text-xs font-medium">Confirm password</span>
-                  <input type="password" className="field" required autoComplete="new-password"
-                    value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)}
-                    placeholder="Enter the same passphrase again" />
+                  <input type="password" id="confirm-password" name="confirm-password" className="field" required
+                    autoComplete="new-password" placeholder="Enter the same passphrase again" />
                 </label>
               )}
               {!pending.exists && (
@@ -435,7 +442,7 @@ export default function App() {
               </button>
             </form>
             <p className="mt-4 text-xs leading-5 text-muted">
-              The encryption password and key remain in your browser.
+              Your browser may offer to save the vault password in its password manager.
             </p>
             <button className="mt-3 flex min-h-10 items-center gap-2 text-xs text-muted hover:text-ink"
               onClick={disconnect}><ArrowLeft size={14} /> Back</button>
