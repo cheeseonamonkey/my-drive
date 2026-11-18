@@ -237,9 +237,9 @@ export default function App() {
       const api = pending.exists
         ? await VaultDrive.unlock(pending.github, pending.repo.default_branch, password, pending.remote)
         : await VaultDrive.create(pending.github, pending.repo.default_branch, password, pending.remote);
+      offerToSaveVaultPassword(pending.repo.full_name, password);
       const interrupted = await api.pendingUpload();
       setResume(interrupted);
-      offerToSaveVaultPassword(pending.repo.full_name, password);
       setConnection({ api, repo: pending.repo });
       setPending(null);
       vaultForm.current?.reset();
@@ -487,8 +487,11 @@ export default function App() {
             <form key={pending.repo.full_name + (pending.exists ? ':unlock' : ':setup')} ref={vaultForm}
               className="mt-5 space-y-4" autoComplete="on"
               onSubmit={(event) => { event.preventDefault(); void unlockVault(); }}>
-              <input type="text" id="vault-username" name="username" autoComplete="username" readOnly
-                value={pending.repo.full_name} className="sr-only" tabIndex={-1} aria-hidden="true" />
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium">Storage repository</span>
+                <input type="text" id="vault-username" name="username" autoComplete="username"
+                  value={pending.repo.full_name} readOnly className="field" spellCheck={false} />
+              </label>
               <label className="block">
                 <span className="mb-1.5 block text-xs font-medium">{pending.exists ? 'Vault password' : 'New vault password'}</span>
                 <input type="password" id={pending.exists ? 'current-password' : 'new-password'}
@@ -571,7 +574,14 @@ export default function App() {
               <p className="text-[11px] leading-5 text-muted">
                 {oauthEnabled ? 'Authorize only the storage repositories you want RepoDrive to access. ' : ''}
                 For manual tokens, grant <strong>Contents: read/write</strong> on just the storage repo.{' '}
-                <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer"
+                <a href={(() => {
+                  const url = new URL('https://github.com/settings/personal-access-tokens/new');
+                  url.searchParams.set('name', 'RepoDrive access');
+                  url.searchParams.set('contents', 'write');
+                  const owner = repository.trim().split('/')[0];
+                  if (/^[\w.-]+$/.test(owner)) url.searchParams.set('target_name', owner);
+                  return url.href;
+                })()} target="_blank" rel="noopener noreferrer"
                   className="font-medium text-accent underline underline-offset-2">Create a token</a>
               </p>
             </form>
